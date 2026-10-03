@@ -25,6 +25,7 @@ from tqdm import tqdm
 from dataset import (
     LaneSegDataset,
     compute_dataset_statistics,
+    default_data_root,
     list_image_files,
     print_dataset_statistics,
     resolve_dataset_dirs,
@@ -83,9 +84,8 @@ def prepare_splits(
     train_split_file = splits_dir / "train.txt"
     test_split_file = splits_dir / "test.txt"
 
-    # If splits already exist, load from files
+    # If splits already exist and match current image set, load from files
     if train_split_file.exists() and test_split_file.exists():
-        print(f"Loading existing splits from {splits_dir}")
         with open(train_split_file, "r") as f:
             train_names = {line.strip() for line in f if line.strip()}
         with open(test_split_file, "r") as f:
@@ -93,25 +93,33 @@ def prepare_splits(
 
         train_full = [p for p in all_images if p.name in train_names]
         test_imgs = [p for p in all_images if p.name in test_names]
-    else:
-        print(f"Generating deterministic 65:35 split with seed={seed}...")
-        rng = random.Random(seed)
-        shuffled = sorted(all_images)
-        rng.shuffle(shuffled)
 
-        n_train = int(round(len(shuffled) * train_ratio))
-        train_full = shuffled[:n_train]
-        test_imgs = shuffled[n_train:]
+        # Only use cached split if it matches current total count
+        if len(train_full) + len(test_imgs) == len(all_images):
+            print(f"Loading existing deterministic splits from {splits_dir}")
+            rng_val = random.Random(seed)
+            train_pool = list(train_full)
+            rng_val.shuffle(train_pool)
+            n_val = max(1, int(round(len(train_pool) * val_ratio)))
+            return train_pool[n_val:], train_pool[:n_val], test_imgs
 
-        with open(train_split_file, "w") as f:
-            for p in sorted(train_full):
-                f.write(f"{p.name}\n")
-        with open(test_split_file, "w") as f:
-            for p in sorted(test_imgs):
-                f.write(f"{p.name}\n")
-        print(f"Saved {len(train_full)} to {train_split_file} and {len(test_imgs)} to {test_split_file}")
+    print(f"Generating deterministic 65:35 split with seed={seed} for {len(all_images)} images...")
+    rng = random.Random(seed)
+    shuffled = sorted(all_images)
+    rng.shuffle(shuffled)
 
-    # Carve validation set out of train portion only (never touch test portion!)
+    n_train = int(round(len(shuffled) * train_ratio))
+    train_full = shuffled[:n_train]
+    test_imgs = shuffled[n_train:]
+
+    with open(train_split_file, "w") as f:
+        for p in sorted(train_full):
+            f.write(f"{p.name}\n")
+    with open(test_split_file, "w") as f:
+        for p in sorted(test_imgs):
+            f.write(f"{p.name}\n")
+    print(f"Saved {len(train_full)} to {train_split_file} and {len(test_imgs)} to {test_split_file}")
+
     rng_val = random.Random(seed)
     train_pool = list(train_full)
     rng_val.shuffle(train_pool)
@@ -178,7 +186,7 @@ def plot_and_save_loss_curve(history_csv: Path, out_path: Path) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Train custom UNet for lane segmentation.")
-    parser.add_argument("--data-root", default="../image/image_1k_fern", help="Path to dataset root")
+    parser.add_argument("--data-root", default=default_data_root(), help="Path to dataset root")
     parser.add_argument("--lane-class-id", type=int, default=0, help="YOLO-seg class ID for lane polygon")
     parser.add_argument("--img-w", type=int, default=64, help="Input width (default: 64)")
     parser.add_argument("--img-h", type=int, default=36, help="Input height (default: 36)")
@@ -194,13 +202,11 @@ def main():
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker processes")
     args = parser.parse_args()
 
-    # Set deterministic seeds
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
     random.seed(args.seed)
 
-    # Device selection (CUDA / MPS / CPU)
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -208,8 +214,8 @@ def main():
     else:
         device = torch.device("cpu")
     print(f"Compute device selected: {device}")
+    print(f"Dataset root: {args.data_root}")
 
-    # Discover and print dataset stats
     images_dir, labels_dir = resolve_dataset_dirs(args.data_root)
     all_images = list_image_files(images_dir)
     if not all_images:
@@ -218,12 +224,10 @@ def main():
     stats = compute_dataset_statistics(all_images, labels_dir, lane_class_id=args.lane_class_id)
     print_dataset_statistics(stats)
 
-    # 65% train / 35% test split (with 10% carved from train for validation)
     splits_dir = Path(args.splits_dir)
     train_imgs, val_imgs, test_imgs = prepare_splits(all_images, splits_dir, seed=args.seed)
     print(f"Split Summary -> Train: {len(train_imgs)} | Val: {len(val_imgs)} | Test (Held-out): {len(test_imgs)}")
 
-    # Datasets and Loaders
     train_ds = LaneSegDataset(
         train_imgs, labels_dir, target_w=args.img_w, target_h=args.img_h,
         lane_class_id=args.lane_class_id, augment=True
@@ -242,12 +246,10 @@ def main():
         num_workers=args.num_workers, pin_memory=(device.type == "cuda")
     )
 
-    # Initialize model, loss, optimizer
     model = UNet(in_channels=3, num_classes=1, base_ch=args.base_ch).to(device)
     criterion = BCEDiceLoss(bce_weight=0.5)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    # Checkpoint & logging directories
     ckpt_dir = Path(args.checkpoint_dir) / args.run_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     tb_writer = SummaryWriter(log_dir=str(Path(args.log_dir) / args.run_name))
@@ -262,7 +264,6 @@ def main():
     print("\nStarting training loop...")
 
     for epoch in range(1, args.epochs + 1):
-        # 1. Training Phase
         model.train()
         train_loss, train_iou, train_batches = 0.0, 0.0, 0
 
@@ -286,7 +287,6 @@ def main():
         train_loss /= max(1, train_batches)
         train_iou /= max(1, train_batches)
 
-        # 2. Validation Phase
         model.eval()
         val_loss, val_iou, val_batches = 0.0, 0.0, 0
         with torch.no_grad():
@@ -305,7 +305,6 @@ def main():
         val_iou /= max(1, val_batches)
         curr_lr = optimizer.param_groups[0]["lr"]
 
-        # 3. Logging
         tb_writer.add_scalar("Loss/train", train_loss, epoch)
         tb_writer.add_scalar("Loss/val", val_loss, epoch)
         tb_writer.add_scalar("IoU/train", train_iou, epoch)
@@ -321,7 +320,6 @@ def main():
               f"Val Loss: {val_loss:.4f}, IoU: {val_iou:.4f} | "
               f"lr: {curr_lr:.2e}")
 
-        # 4. Checkpointing
         ckpt_config = {
             "img_w": args.img_w,
             "img_h": args.img_h,
@@ -352,7 +350,6 @@ def main():
     tb_writer.close()
     print(f"\nTraining completed! Checkpoints saved in {ckpt_dir}")
 
-    # Generate loss curve visualization
     loss_curve_path = Path("assets") / "loss_curve.png"
     plot_and_save_loss_curve(history_csv, loss_curve_path)
 

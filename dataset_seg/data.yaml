@@ -1,0 +1,10 @@
+path: C:/Users/cross/Desktop/ecosystem/Assignment-9/dataset_seg
+train: images/train
+val: images/val
+
+names:
+  0: Lane
+  1: Non-Tracking Area
+  2: Tracking line left
+  3: Tracking line center
+  4: Tracking line right

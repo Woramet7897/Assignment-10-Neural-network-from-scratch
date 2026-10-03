@@ -2,7 +2,7 @@
 
 Key Features:
 1. Flexible Dataset Discovery: Works with either Ultralytics directory structures
-   (`<data_root>/images/train/` or `<data_root>/frames/`) and `<data_root>/labels/train/`.
+   (`<data_root>/images/{train,val}` or `<data_root>/frames/`) and `<data_root>/labels/{train,val}`.
 2. Annotation Filtering: Strictly filters for the lane polygon class (configurable via
    `--lane-class-id`, default 0), discarding bounding boxes (5 values) and polyline classes.
 3. Native-Resolution Rasterization: Polygons are rasterized onto a full 1280x720 binary mask
@@ -31,37 +31,57 @@ def resolve_dataset_dirs(data_root: Union[str, Path]) -> Tuple[Path, Path]:
     data_root = Path(data_root)
 
     # Check images directory
-    if (data_root / "frames").exists():
-        images_dir = data_root / "frames"
-    elif (data_root / "images" / "train").exists():
-        images_dir = data_root / "images" / "train"
-    elif (data_root / "images").exists():
+    if (data_root / "images").exists():
         images_dir = data_root / "images"
+    elif (data_root / "frames").exists():
+        images_dir = data_root / "frames"
     else:
         images_dir = data_root
 
     # Check labels directory
-    if (data_root / "labels" / "train").exists():
-        labels_dir = data_root / "labels" / "train"
-    elif (data_root / "labels").exists():
+    if (data_root / "labels").exists():
         labels_dir = data_root / "labels"
     else:
-        labels_dir = data_root / "labels"
+        labels_dir = data_root
 
     return images_dir, labels_dir
 
 
 def list_image_files(images_dir: Union[str, Path]) -> List[Path]:
-    """Return sorted list of image file paths from directory."""
+    """Return sorted list of image file paths from directory, including nested train/val."""
     images_dir = Path(images_dir)
     if not images_dir.exists():
         return []
-    return sorted(p for p in images_dir.iterdir() if p.suffix.lower() in IMG_EXTENSIONS)
+
+    direct = sorted(p for p in images_dir.iterdir() if p.is_file() and p.suffix.lower() in IMG_EXTENSIONS)
+    if direct:
+        return direct
+
+    nested = sorted(p for p in images_dir.rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTENSIONS)
+    return nested
 
 
 def label_path_for_image(image_path: Union[str, Path], labels_dir: Union[str, Path]) -> Path:
-    """Derive corresponding .txt label path from image path."""
-    return Path(labels_dir) / f"{Path(image_path).stem}.txt"
+    """Derive corresponding .txt label path from image path, handling train/val subfolders."""
+    image_path = Path(image_path)
+    labels_dir = Path(labels_dir)
+    stem = image_path.stem
+
+    candidate = labels_dir / f"{stem}.txt"
+    if candidate.exists():
+        return candidate
+
+    parent_name = image_path.parent.name
+    candidate_sub = labels_dir / parent_name / f"{stem}.txt"
+    if candidate_sub.exists():
+        return candidate_sub
+
+    for sub in ["train", "val", "test"]:
+        cand = labels_dir / sub / f"{stem}.txt"
+        if cand.exists():
+            return cand
+
+    return candidate
 
 
 def load_yolo_seg_polygons(
@@ -249,9 +269,15 @@ class LaneSegDataset(Dataset):
         return img_t, mask_t
 
 
+def default_data_root() -> str:
+    if Path("dataset_seg").exists():
+        return "dataset_seg"
+    return "../image/image_1k_fern"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test dataset loading and display statistics.")
-    parser.add_argument("--data-root", default="../image/image_1k_fern", help="Path to dataset root")
+    parser.add_argument("--data-root", default=default_data_root(), help="Path to dataset root")
     parser.add_argument("--lane-class-id", type=int, default=0, help="Class ID for lane polygons")
     parser.add_argument("--target-w", type=int, default=64)
     parser.add_argument("--target-h", type=int, default=36)
@@ -259,6 +285,7 @@ if __name__ == "__main__":
 
     img_dir, lbl_dir = resolve_dataset_dirs(args.data_root)
     img_files = list_image_files(img_dir)
+    print(f"Data root: {args.data_root}")
     print(f"Discovered {len(img_files)} images in {img_dir}")
     print(f"Labels directory: {lbl_dir}")
 

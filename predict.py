@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from dataset import list_image_files, resolve_dataset_dirs
+from dataset import default_data_root, list_image_files, resolve_dataset_dirs
 from model import UNet
 
 
@@ -48,15 +48,12 @@ def predict_single_image(
     orig_h, orig_w = image_bgr.shape[:2]
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-    # Resize to network input dimensions
     resized = cv2.resize(image_rgb, (img_w, img_h), interpolation=cv2.INTER_AREA)
     tensor = torch.from_numpy(resized.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
 
-    # Forward pass
     logits = model(tensor)
     prob_small = torch.sigmoid(logits)[0, 0].cpu().numpy()
 
-    # Bilinear upsample on probabilities to native resolution for smooth boundary
     prob_full = cv2.resize(prob_small, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
     binary_mask = (prob_full > threshold).astype(np.uint8) * 255
 
@@ -83,7 +80,7 @@ def create_overlay(
 def main():
     parser = argparse.ArgumentParser(description="Run lane segmentation inference on test split.")
     parser.add_argument("--checkpoint", default="checkpoints/unet_lane/best.pt", help="Path to model checkpoint")
-    parser.add_argument("--data-root", default="../image/image_1k_fern", help="Path to dataset root")
+    parser.add_argument("--data-root", default=default_data_root(), help="Path to dataset root")
     parser.add_argument("--splits-dir", default="splits", help="Directory containing test.txt")
     parser.add_argument("--split", default="test", help="Which split to evaluate: test or train")
     parser.add_argument("--run-name", default="", help="Subdirectory under result/ (default: direct in result/)")
@@ -95,7 +92,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    # Load checkpoint
     ckpt_path = Path(args.checkpoint)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
@@ -105,7 +101,6 @@ def main():
     img_h = config.get("img_h", 36)
     print(f"Loaded checkpoint from {ckpt_path} (Model input: {img_w}x{img_h}, base_ch: {config.get('base_ch', 16)})")
 
-    # Resolve output directory
     out_dir = Path(args.output_dir)
     if args.run_name:
         out_dir = out_dir / args.run_name
@@ -115,7 +110,6 @@ def main():
     if overlay_dir:
         overlay_dir.mkdir(parents=True, exist_ok=True)
 
-    # Locate images from split file
     images_dir, _ = resolve_dataset_dirs(args.data_root)
     split_file = Path(args.splits_dir) / f"{args.split}.txt"
     if not split_file.exists():
@@ -124,7 +118,14 @@ def main():
     with open(split_file, "r") as f:
         target_names = [line.strip() for line in f if line.strip()]
 
-    target_paths = [images_dir / name for name in target_names if (images_dir / name).exists()]
+    target_paths = []
+    all_available = {p.name: p for p in list_image_files(images_dir)}
+    for name in target_names:
+        if name in all_available:
+            target_paths.append(all_available[name])
+        elif (images_dir / name).exists():
+            target_paths.append(images_dir / name)
+
     print(f"Running inference on {len(target_paths)} test frames from {split_file}...")
 
     for img_path in tqdm(target_paths, desc="Predicting"):
@@ -134,11 +135,9 @@ def main():
 
         pred_mask, _ = predict_single_image(model, image_bgr, img_w, img_h, device, args.threshold)
 
-        # Save 1280x720 binary mask PNG
         mask_out_path = out_dir / f"{img_path.stem}.png"
         cv2.imwrite(str(mask_out_path), pred_mask)
 
-        # Optional overlay
         if args.save_overlay:
             overlay = create_overlay(image_bgr, pred_mask, color_bgr=(0, 220, 0), alpha=0.45)
             cv2.imwrite(str(overlay_dir / f"{img_path.stem}_overlay.jpg"), overlay)

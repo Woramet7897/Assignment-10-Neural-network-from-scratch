@@ -19,7 +19,9 @@ import cv2
 import numpy as np
 
 from dataset import (
+    default_data_root,
     label_path_for_image,
+    list_image_files,
     load_yolo_seg_polygons,
     polygons_to_mask,
     resolve_dataset_dirs,
@@ -42,7 +44,7 @@ def compute_pixel_iou(pred_mask: np.ndarray, gt_mask: np.ndarray, eps: float = 1
 def main():
     parser = argparse.ArgumentParser(description="Evaluate lane segmentation performance.")
     parser.add_argument("--result-dir", default="result", help="Directory containing predicted masks (.png)")
-    parser.add_argument("--data-root", default="../image/image_1k_fern", help="Path to dataset root")
+    parser.add_argument("--data-root", default=default_data_root(), help="Path to dataset root")
     parser.add_argument("--splits-dir", default="splits", help="Directory containing test.txt")
     parser.add_argument("--split", default="test", help="Which split to evaluate")
     parser.add_argument("--lane-class-id", type=int, default=0, help="YOLO polygon class ID for lane")
@@ -64,31 +66,29 @@ def main():
     print(f"Loaded {len(target_images)} image names from {split_file}")
     print(f"Comparing predicted masks in {result_dir} against GT in {labels_dir} (IoU threshold: {args.iou_threshold})")
 
+    all_available = {p.name: p for p in list_image_files(images_dir)}
     per_image_results = []
     missing_preds = 0
 
     for img_name in target_images:
-        img_path = images_dir / img_name
-        stem = img_path.stem
+        img_path = all_available.get(img_name, images_dir / img_name)
+        stem = Path(img_name).stem
         pred_path = result_dir / f"{stem}.png"
 
         if not pred_path.exists():
             missing_preds += 1
             continue
 
-        # Load native image or use default 1280x720 dimensions
         if img_path.exists():
             orig_img = cv2.imread(str(img_path))
             h, w = orig_img.shape[:2]
         else:
             w, h = 1280, 720
 
-        # Load ground truth rasterized mask at native resolution
         lbl_path = label_path_for_image(img_path, labels_dir)
         polys = load_yolo_seg_polygons(lbl_path, w, h, lane_class_id=args.lane_class_id)
         gt_mask = polygons_to_mask(polys, w, h)
 
-        # Load prediction mask
         pred_mask = cv2.imread(str(pred_path), cv2.IMREAD_GRAYSCALE)
         if pred_mask is None:
             missing_preds += 1

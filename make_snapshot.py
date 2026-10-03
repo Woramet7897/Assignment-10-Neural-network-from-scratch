@@ -16,7 +16,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from dataset import (
+    default_data_root,
     label_path_for_image,
+    list_image_files,
     load_yolo_seg_polygons,
     polygons_to_mask,
     resolve_dataset_dirs,
@@ -43,7 +45,7 @@ def blend_overlay(
 def main():
     parser = argparse.ArgumentParser(description="Generate side-by-side snapshot comparison figures.")
     parser.add_argument("--result-dir", default="result", help="Directory containing predicted masks (.png)")
-    parser.add_argument("--data-root", default="../image/image_1k_fern", help="Dataset root")
+    parser.add_argument("--data-root", default=default_data_root(), help="Dataset root")
     parser.add_argument("--eval-csv", default="test_eval_per_image.csv", help="Per-image evaluation CSV")
     parser.add_argument("--output-dir", default="assets", help="Output directory for snapshots")
     parser.add_argument("--lane-class-id", type=int, default=0, help="Lane polygon class ID")
@@ -67,7 +69,6 @@ def main():
                 })
         records.sort(key=lambda r: r["iou"])
     else:
-        # Fallback to scanning result_dir directly
         pred_files = sorted(Path(args.result_dir).glob("*.png"))
         for p in pred_files:
             records.append({"image": f"{p.stem}.jpg", "iou": 0.0, "detected": "N/A"})
@@ -76,26 +77,25 @@ def main():
         print("No evaluation records or prediction files found.")
         return
 
-    # Select representative samples:
-    # Lowest IoU (edge case / challenge), median IoUs, and top IoUs
     n_rec = len(records)
     selected_indices = [
-        0,  # Minimum IoU (challenge / edge case)
-        n_rec // 4,  # Lower quartile
-        n_rec // 2,  # Median
-        n_rec - 1   # Top performer
+        0,              # Minimum IoU (challenge / edge case)
+        n_rec // 4,     # Lower quartile
+        n_rec // 2,     # Median
+        n_rec - 1       # Top performer
     ]
     selected_indices = sorted(list(set(selected_indices)))
     selected_records = [records[i] for i in selected_indices[:args.num_samples]]
 
     print(f"Creating snapshots for {len(selected_records)} representative test frames...")
 
+    all_available = {p.name: p for p in list_image_files(images_dir)}
     composite_rows = []
 
     for rank_idx, rec in enumerate(selected_records):
         img_name = rec["image"]
-        img_path = images_dir / img_name
-        stem = img_path.stem
+        img_path = all_available.get(img_name, images_dir / img_name)
+        stem = Path(img_name).stem
         pred_path = Path(args.result_dir) / f"{stem}.png"
 
         if not img_path.exists() or not pred_path.exists():
@@ -105,23 +105,19 @@ def main():
         orig_h, orig_w = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-        # Ground truth mask
         lbl_path = label_path_for_image(img_path, labels_dir)
         polys = load_yolo_seg_polygons(lbl_path, orig_w, orig_h, lane_class_id=args.lane_class_id)
         gt_mask = polygons_to_mask(polys, orig_w, orig_h)
 
-        # Predicted mask
         pred_mask = cv2.imread(str(pred_path), cv2.IMREAD_GRAYSCALE)
         if pred_mask.shape != (orig_h, orig_w):
             pred_mask = cv2.resize(pred_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
 
-        # Render overlays: GT = Cyan (0, 200, 255), Pred = Green (0, 255, 64)
         gt_overlay = blend_overlay(image_rgb, gt_mask, color_rgb=(0, 220, 220), alpha=0.45)
         pred_overlay = blend_overlay(image_rgb, pred_mask, color_rgb=(30, 220, 50), alpha=0.45)
 
         composite_rows.append((stem, rec["iou"], rec["detected"], image_rgb, gt_overlay, pred_overlay))
 
-        # Individual 3-panel snapshot figure
         fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=200)
         axes[0].imshow(image_rgb)
         axes[0].set_title(f"Original Frame: {stem}", fontsize=12, fontweight="bold")
@@ -142,7 +138,6 @@ def main():
         plt.close()
         print(f"  [+] Saved {single_path}")
 
-    # Generate composite grid figure
     if composite_rows:
         num_rows = len(composite_rows)
         fig, axes = plt.subplots(num_rows, 3, figsize=(18, 4.5 * num_rows), dpi=200)
