@@ -1,0 +1,14 @@
+{
+  "device": "cuda",
+  "input_resolution": "64x36",
+  "batch_size": 1,
+  "total_parameters": 482737,
+  "parameters_million": 0.4827,
+  "checkpoint_file_size_mb": 1.872,
+  "peak_gpu_memory_allocated_mb": 4.71,
+  "process_rss_delta_mb": 296.62,
+  "warmup_runs": 100,
+  "benchmark_runs": 500,
+  "average_latency_ms": 2.001,
+  "throughput_fps": 499.8
+}

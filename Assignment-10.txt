@@ -1,0 +1,31 @@
+Assignment-10 
+Training from scratch custom-Unet and custom-YOLO-seg
+on a domain specific dataset - almondmatcha-lane-detection/segmentation
+
+0. Create a Custom lane detection Unet Repository
+
+1. Generate a custom Unet convolutional neural network for lane segmentation (single class segmentation). 
+I want to build the network from scratch by.
+- input size is 48x48 RGB
+- output size is 48x48 Binary mask
+then generate a mermaid graph for visualize the network structure with custom-unet-architecture.md
+
+1.1 generate train.py with auxiliary functions, since the actual image is in various sizes.
+The ground truth located at /dir and the annotation are in ultralytics Yolo-seg format (polygon). 
+You should prepare the train.py to support this.
+
+integrate the tensorboard for loss function logging.
+
+apply slightly image augmentation to training samples, by randomly
+ - add a small white balance shift to the input image,
+ - add a small brightness shift to the input image, to mimic the noise from sunlight situation
+ - add a small blur into input image.
+- train the networtk for 30 epoch on local machine. with batch size 2-4 depends on available system or GPU memory 
+
+1.2 generate the inference.py for the lane detection and the script will produce binary mask results, save the result masks into disk under /run subdir 
+
+1.3 generate the evaluation.py for network performance measurement. The script will load the result masks and compare them by the pixel-wise IoU with the groundtruth. 
+
+The detection metrics are detect or not (Yes/No with higher than 0.6 iou is positive) and The average IoU of detected results.
+
+

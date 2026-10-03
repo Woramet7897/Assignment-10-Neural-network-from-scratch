@@ -1,0 +1,14 @@
+{
+  "device": "cpu",
+  "input_resolution": "64x36",
+  "batch_size": 1,
+  "total_parameters": 482737,
+  "parameters_million": 0.4827,
+  "checkpoint_file_size_mb": 1.872,
+  "peak_gpu_memory_allocated_mb": 0.0,
+  "process_rss_delta_mb": 7.88,
+  "warmup_runs": 100,
+  "benchmark_runs": 500,
+  "average_latency_ms": 5.508,
+  "throughput_fps": 181.6
+}
