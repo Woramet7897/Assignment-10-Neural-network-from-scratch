@@ -1,8 +1,9 @@
 """Train custom UNet from scratch on PSU-reservoir lane dataset.
 
 Specs followed:
-- 65% Train : 35% Test deterministic split saved to splits/train.txt & splits/test.txt.
-- 10% validation carved out of train split for checkpoint selection. Test set is NEVER touched.
+- Supports both --split-mode random (default) and --split-mode temporal.
+  * random: deterministic 65:35 shuffle with seed=42, 10% val carved randomly from train.
+  * temporal: chronological first 65% train, last 35% test, 10% val carved from END of train.
 - 64x36 RGB input (16:9), binary mask output.
 - Training-only photometric augmentation on native 1280x720 frames before resize.
 - BCE + Dice Loss, Adam optimizer, TensorBoard logging, CSV history, loss curve plot.
@@ -77,7 +78,8 @@ def prepare_splits(
     splits_dir: Path,
     seed: int = 42,
     train_ratio: float = 0.65,
-    val_ratio: float = 0.10
+    val_ratio: float = 0.10,
+    split_mode: str = "random"
 ) -> Tuple[List[Path], List[Path], List[Path]]:
     """Create or load deterministic 65:35 split and carve 10% validation from train."""
     splits_dir.mkdir(parents=True, exist_ok=True)
@@ -94,39 +96,52 @@ def prepare_splits(
         train_full = [p for p in all_images if p.name in train_names]
         test_imgs = [p for p in all_images if p.name in test_names]
 
-        # Only use cached split if it matches current total count
         if len(train_full) + len(test_imgs) == len(all_images):
-            print(f"Loading existing deterministic splits from {splits_dir}")
-            rng_val = random.Random(seed)
-            train_pool = list(train_full)
-            rng_val.shuffle(train_pool)
-            n_val = max(1, int(round(len(train_pool) * val_ratio)))
-            return train_pool[n_val:], train_pool[:n_val], test_imgs
+            print(f"Loading existing {split_mode} splits from {splits_dir}")
+            if split_mode == "temporal":
+                # Carve 10% validation from the END of the train portion
+                n_val = max(1, int(round(len(train_full) * val_ratio)))
+                return train_full[:-n_val], train_full[-n_val:], test_imgs
+            else:
+                rng_val = random.Random(seed)
+                train_pool = list(train_full)
+                rng_val.shuffle(train_pool)
+                n_val = max(1, int(round(len(train_pool) * val_ratio)))
+                return train_pool[n_val:], train_pool[:n_val], test_imgs
 
-    print(f"Generating deterministic 65:35 split with seed={seed} for {len(all_images)} images...")
-    rng = random.Random(seed)
-    shuffled = sorted(all_images)
-    rng.shuffle(shuffled)
+    sorted_images = sorted(all_images, key=lambda p: p.name)
+    n_train = int(round(len(sorted_images) * train_ratio))
 
-    n_train = int(round(len(shuffled) * train_ratio))
-    train_full = shuffled[:n_train]
-    test_imgs = shuffled[n_train:]
+    if split_mode == "temporal":
+        print(f"Generating TEMPORAL split for {len(sorted_images)} images (first 65% train, last 35% test)...")
+        train_full = sorted_images[:n_train]
+        test_imgs = sorted_images[n_train:]
+        n_val = max(1, int(round(len(train_full) * val_ratio)))
+        # Carve 10% val from the END of train portion chronologically
+        train_imgs = train_full[:-n_val]
+        val_imgs = train_full[-n_val:]
+    else:
+        print(f"Generating RANDOM deterministic 65:35 split with seed={seed} for {len(sorted_images)} images...")
+        rng = random.Random(seed)
+        shuffled = list(sorted_images)
+        rng.shuffle(shuffled)
+        train_full = shuffled[:n_train]
+        test_imgs = shuffled[n_train:]
+
+        rng_val = random.Random(seed)
+        train_pool = list(train_full)
+        rng_val.shuffle(train_pool)
+        n_val = max(1, int(round(len(train_pool) * val_ratio)))
+        val_imgs = train_pool[:n_val]
+        train_imgs = train_pool[n_val:]
 
     with open(train_split_file, "w") as f:
-        for p in sorted(train_full):
+        for p in sorted(train_full, key=lambda p: p.name):
             f.write(f"{p.name}\n")
     with open(test_split_file, "w") as f:
-        for p in sorted(test_imgs):
+        for p in sorted(test_imgs, key=lambda p: p.name):
             f.write(f"{p.name}\n")
     print(f"Saved {len(train_full)} to {train_split_file} and {len(test_imgs)} to {test_split_file}")
-
-    rng_val = random.Random(seed)
-    train_pool = list(train_full)
-    rng_val.shuffle(train_pool)
-
-    n_val = max(1, int(round(len(train_pool) * val_ratio)))
-    val_imgs = train_pool[:n_val]
-    train_imgs = train_pool[n_val:]
 
     return train_imgs, val_imgs, test_imgs
 
@@ -187,6 +202,8 @@ def plot_and_save_loss_curve(history_csv: Path, out_path: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Train custom UNet for lane segmentation.")
     parser.add_argument("--data-root", default=default_data_root(), help="Path to dataset root")
+    parser.add_argument("--split-mode", choices=["random", "temporal"], default="random",
+                        help="Split mode: 'random' (default) or 'temporal' (chronological)")
     parser.add_argument("--lane-class-id", type=int, default=0, help="YOLO-seg class ID for lane polygon")
     parser.add_argument("--img-w", type=int, default=64, help="Input width (default: 64)")
     parser.add_argument("--img-h", type=int, default=36, help="Input height (default: 36)")
@@ -195,12 +212,18 @@ def main():
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size (default: 4)")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: 1e-3)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--splits-dir", default="splits", help="Directory to save/load train.txt and test.txt")
+    parser.add_argument("--splits-dir", default=None, help="Directory to save/load train.txt and test.txt")
     parser.add_argument("--checkpoint-dir", default="checkpoints", help="Directory for saved model checkpoints")
     parser.add_argument("--log-dir", default="runs", help="Directory for TensorBoard logs")
-    parser.add_argument("--run-name", default="unet_lane", help="Run identifier")
+    parser.add_argument("--run-name", default=None, help="Run identifier")
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker processes")
     args = parser.parse_args()
+
+    # Configure defaults according to split-mode
+    if args.splits_dir is None:
+        args.splits_dir = "splits_temporal" if args.split_mode == "temporal" else "splits"
+    if args.run_name is None:
+        args.run_name = "unet_lane_temporal" if args.split_mode == "temporal" else "unet_lane"
 
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -214,7 +237,7 @@ def main():
     else:
         device = torch.device("cpu")
     print(f"Compute device selected: {device}")
-    print(f"Dataset root: {args.data_root}")
+    print(f"Dataset root: {args.data_root} | Split mode: {args.split_mode} | Run name: {args.run_name}")
 
     images_dir, labels_dir = resolve_dataset_dirs(args.data_root)
     all_images = list_image_files(images_dir)
@@ -225,8 +248,10 @@ def main():
     print_dataset_statistics(stats)
 
     splits_dir = Path(args.splits_dir)
-    train_imgs, val_imgs, test_imgs = prepare_splits(all_images, splits_dir, seed=args.seed)
-    print(f"Split Summary -> Train: {len(train_imgs)} | Val: {len(val_imgs)} | Test (Held-out): {len(test_imgs)}")
+    train_imgs, val_imgs, test_imgs = prepare_splits(
+        all_images, splits_dir, seed=args.seed, split_mode=args.split_mode
+    )
+    print(f"Split Summary ({args.split_mode}) -> Train: {len(train_imgs)} | Val: {len(val_imgs)} | Test (Held-out): {len(test_imgs)}")
 
     train_ds = LaneSegDataset(
         train_imgs, labels_dir, target_w=args.img_w, target_h=args.img_h,
@@ -324,7 +349,8 @@ def main():
             "img_w": args.img_w,
             "img_h": args.img_h,
             "base_ch": args.base_ch,
-            "lane_class_id": args.lane_class_id
+            "lane_class_id": args.lane_class_id,
+            "split_mode": args.split_mode
         }
         last_ckpt = {
             "epoch": epoch,
@@ -350,7 +376,8 @@ def main():
     tb_writer.close()
     print(f"\nTraining completed! Checkpoints saved in {ckpt_dir}")
 
-    loss_curve_path = Path("assets") / "loss_curve.png"
+    loss_curve_filename = "loss_curve_temporal.png" if args.split_mode == "temporal" else "loss_curve.png"
+    loss_curve_path = Path("assets") / loss_curve_filename
     plot_and_save_loss_curve(history_csv, loss_curve_path)
 
 

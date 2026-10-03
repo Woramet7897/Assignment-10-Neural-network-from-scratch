@@ -270,9 +270,11 @@ class LaneSegDataset(Dataset):
 
 
 def default_data_root() -> str:
+    if Path("../image/image_1k_fern").exists():
+        return "../image/image_1k_fern"
     if Path("dataset_seg").exists():
         return "dataset_seg"
-    return "../image/image_1k_fern"
+    return "./data"
 
 
 if __name__ == "__main__":

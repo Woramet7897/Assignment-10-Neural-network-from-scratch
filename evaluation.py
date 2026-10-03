@@ -49,8 +49,8 @@ def main():
     parser.add_argument("--split", default="test", help="Which split to evaluate")
     parser.add_argument("--lane-class-id", type=int, default=0, help="YOLO polygon class ID for lane")
     parser.add_argument("--iou-threshold", type=float, default=0.6, help="IoU threshold for positive detection (Yes/No)")
-    parser.add_argument("--output-json", default="metrics.json", help="Path to output metrics JSON file")
-    parser.add_argument("--output-csv", default="test_eval_per_image.csv", help="Path to output per-image CSV")
+    parser.add_argument("--output-json", default="results/metrics.json", help="Path to output metrics JSON file")
+    parser.add_argument("--output-csv", default="results/test_eval_per_image.csv", help="Path to output per-image CSV")
     args = parser.parse_args()
 
     result_dir = Path(args.result_dir)

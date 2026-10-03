@@ -4,7 +4,7 @@ Generates side-by-side figures:
   [Original Frame] | [Ground-Truth Overlay] | [Predicted Overlay]
 at native 1280x720 resolution.
 Picks representative examples including high-performing cases and edge/failure cases.
-Saves individual snapshots and a composite comparison figure to assets/.
+Saves individual snapshots, failure case (snapshot_failure.png), and composite comparison to assets/.
 """
 import argparse
 import csv
@@ -46,7 +46,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate side-by-side snapshot comparison figures.")
     parser.add_argument("--result-dir", default="result", help="Directory containing predicted masks (.png)")
     parser.add_argument("--data-root", default=default_data_root(), help="Dataset root")
-    parser.add_argument("--eval-csv", default="test_eval_per_image.csv", help="Per-image evaluation CSV")
+    parser.add_argument("--eval-csv", default="results/test_eval_per_image.csv", help="Per-image evaluation CSV")
     parser.add_argument("--output-dir", default="assets", help="Output directory for snapshots")
     parser.add_argument("--lane-class-id", type=int, default=0, help="Lane polygon class ID")
     parser.add_argument("--num-samples", type=int, default=4, help="Number of representative samples")
@@ -135,6 +135,13 @@ def main():
         plt.tight_layout()
         single_path = out_dir / f"snapshot_{rank_idx+1}_{stem}.png"
         plt.savefig(str(single_path), bbox_inches="tight")
+
+        # If this is the lowest IoU case (challenge/failure case), also save as snapshot_failure.png
+        if rank_idx == 0:
+            failure_path = out_dir / "snapshot_failure.png"
+            plt.savefig(str(failure_path), bbox_inches="tight")
+            print(f"  [+] Saved failure case snapshot to {failure_path}")
+
         plt.close()
         print(f"  [+] Saved {single_path}")
 
