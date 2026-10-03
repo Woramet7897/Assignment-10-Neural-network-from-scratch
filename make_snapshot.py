@@ -118,7 +118,7 @@ def main():
 
         composite_rows.append((stem, rec["iou"], rec["detected"], image_rgb, gt_overlay, pred_overlay))
 
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=200)
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=100)
         axes[0].imshow(image_rgb)
         axes[0].set_title(f"Original Frame: {stem}", fontsize=12, fontweight="bold")
         axes[0].axis("off")
@@ -147,7 +147,7 @@ def main():
 
     if composite_rows:
         num_rows = len(composite_rows)
-        fig, axes = plt.subplots(num_rows, 3, figsize=(18, 4.5 * num_rows), dpi=200)
+        fig, axes = plt.subplots(num_rows, 3, figsize=(18, 4.5 * num_rows), dpi=100)
         if num_rows == 1:
             axes = np.expand_dims(axes, 0)
 
@@ -166,8 +166,8 @@ def main():
             axes[i, 2].axis("off")
 
         plt.tight_layout()
-        composite_path = out_dir / "snapshot_comparison.png"
-        plt.savefig(str(composite_path), bbox_inches="tight")
+        composite_path = out_dir / "snapshot_comparison.jpg"
+        plt.savefig(str(composite_path), bbox_inches="tight", pil_kwargs={"quality": 88})
         plt.close()
         print(f"\n[+] Master comparison snapshot saved to: {composite_path}")
 

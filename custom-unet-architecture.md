@@ -5,7 +5,7 @@ Single-class (lane) binary segmentation network built completely from scratch in
 - **Input**: `(N, 3, 36, 64)` — RGB normalized to `[0, 1]` (native 16:9 aspect ratio matching 1280x720 video).
 - **Output**: `(N, 1, 36, 64)` — Raw logits (apply sigmoid + threshold 0.5 for binary mask).
 - **Base Channels**: 16 (`16 -> 32 -> 64 -> 128` bottleneck).
-- **Total Parameters**: 482,737 (~0.483M, well within the 0.5–2M laptop requirement).
+- **Total Parameters**: 482,737 (~0.483M, small enough to run on a local machine / laptop).
 - **Implementation**: [model.py](model.py).
 
 ---
@@ -101,7 +101,7 @@ The following table is extracted dynamically via forward execution hooks on the 
    Because `9 // 2 = 4`, standard transposed convolution with stride 2 produces `4 * 2 = 8` in height, which does not match the skip connection's height of 9. Our custom `Up` module detects this mismatch and applies dynamic spatial alignment (`F.interpolate(..., size=skip.shape[2:])`), guaranteeing seamless tensor concatenation without manual cropping.
 
 5. **Channel Widths and Parameter Budget**:
-   Setting `base_ch = 16` scales channel widths smoothly through `16 -> 32 -> 64 -> 128`. This yields 482,737 parameters (~0.48M), fitting comfortably within the 0.5–2M lightweight budget and preventing overfitting on ~1,000 frames.
+   Setting `base_ch = 16` scales channel widths smoothly through `16 -> 32 -> 64 -> 128`. This yields 482,737 parameters (~0.48M), which keeps the model small for laptop inference. Furthermore, BatchNorm eases optimisation when training from scratch.
 
 6. **Why ConvTranspose2d instead of Nearest Upsample**:
    Learnable transpose convolutions allow the network to learn smooth interpolation kernels tailored specifically to lane geometries.

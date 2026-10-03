@@ -6,9 +6,9 @@
   "parameters_million": 0.4827,
   "checkpoint_file_size_mb": 1.872,
   "peak_gpu_memory_allocated_mb": 0.0,
-  "process_rss_delta_mb": 7.88,
+  "process_rss_delta_mb": 7.72,
   "warmup_runs": 100,
   "benchmark_runs": 500,
-  "average_latency_ms": 5.508,
-  "throughput_fps": 181.6
+  "average_latency_ms": 26.816,
+  "throughput_fps": 37.3
 }
