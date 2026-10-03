@@ -4,4 +4,21 @@ __pycache__/
 .vscode/
 .idea/
 *.tmp
+
+# Datasets
+dataset_seg/
+
+# Prediction output masks
 result/
+result_temporal/
+
+# TensorBoard event files
+events.out.tfevents*
+runs/**/events.out.tfevents*
+runs/*/*.tfevents*
+
+# Ignore all checkpoint files except checkpoints/unet_lane/best.pt
+checkpoints/**
+!checkpoints/
+!checkpoints/unet_lane/
+!checkpoints/unet_lane/best.pt
